@@ -55,6 +55,7 @@ services:
         fs.mkdirSync('/home/node/.openclaw', { recursive: true });
         const config = {
           gateway: {
+            mode: 'local',
             trustedProxies: (e.OPENCLAW_TRUSTED_PROXIES || '127.0.0.1,::1')
               .split(',').map(s => s.trim()),
             controlUi: {
