@@ -35,6 +35,9 @@ services:
       # ── Reverse proxy / CORS ──────────────────────────────────────────────
       OPENCLAW_ALLOWED_ORIGINS: ${OPENCLAW_ALLOWED_ORIGINS:-}
       OPENCLAW_TRUSTED_PROXIES: ${OPENCLAW_TRUSTED_PROXIES:-127.0.0.1,10.11.0.0/16,::1}
+      # Set to 1 to skip per-browser device pairing — token alone grants access.
+      # Convenient for a single-user setup; weaker than the default (no per-device identity).
+      OPENCLAW_DISABLE_DEVICE_AUTH: ${OPENCLAW_DISABLE_DEVICE_AUTH:-}
       # ── Custom / private model provider ───────────────────────────────────
       OPENCLAW_BASE_URL: ${OPENCLAW_BASE_URL:-}
       OPENCLAW_API_KEY: ${OPENCLAW_API_KEY:-}
@@ -62,7 +65,8 @@ services:
               allowedOrigins: e.OPENCLAW_ALLOWED_ORIGINS
                 ? e.OPENCLAW_ALLOWED_ORIGINS.split(',').map(s => s.trim())
                 : [],
-              dangerouslyAllowHostHeaderOriginFallback: true
+              dangerouslyAllowHostHeaderOriginFallback: true,
+              dangerouslyDisableDeviceAuth: e.OPENCLAW_DISABLE_DEVICE_AUTH === '1'
             }
           }
         };
