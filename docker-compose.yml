@@ -75,7 +75,7 @@ services:
                 baseUrl: e.OPENCLAW_BASE_URL,
                 apiKey: e.OPENCLAW_API_KEY || '',
                 api: 'openai-completions',
-                models: [{ id: m }]
+                models: [{ id: m, name: m }]
               }
             }
           };
