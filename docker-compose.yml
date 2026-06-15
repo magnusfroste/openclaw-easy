@@ -1,0 +1,100 @@
+#
+# docker-compose.yml — OpenClaw Gateway on Easypanel
+#
+# Uses the upstream ghcr.io/openclaw/openclaw image — no local build.
+# On every start, a small inline script writes openclaw.json from env vars
+# so gateway config (trusted proxies, allowed origins, custom provider) is
+# always in sync with the values you set in Easypanel.
+#
+services:
+  openclaw:
+    image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:2026.6.6}
+    pull_policy: ${PULL_POLICY:-always}
+    restart: unless-stopped
+    init: true
+    cap_drop:
+      - NET_RAW
+      - NET_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${OPENCLAW_PORT:-18789}:18789"
+    volumes:
+      - openclaw-state:/home/node/.openclaw
+      - openclaw-auth:/home/node/.config/openclaw
+    environment:
+      HOME: /home/node
+      TERM: xterm-256color
+      OPENCLAW_STATE_DIR: /home/node/.openclaw
+      OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
+      OPENCLAW_DISABLE_BONJOUR: "1"
+      # ── Required ──────────────────────────────────────────────────────────
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
+      # ── Reverse proxy / CORS ──────────────────────────────────────────────
+      OPENCLAW_ALLOWED_ORIGINS: ${OPENCLAW_ALLOWED_ORIGINS:-}
+      OPENCLAW_TRUSTED_PROXIES: ${OPENCLAW_TRUSTED_PROXIES:-127.0.0.1,10.11.0.0/16,::1}
+      # ── Custom / private model provider ───────────────────────────────────
+      OPENCLAW_BASE_URL: ${OPENCLAW_BASE_URL:-}
+      OPENCLAW_API_KEY: ${OPENCLAW_API_KEY:-}
+      OPENCLAW_MODEL: ${OPENCLAW_MODEL:-}
+      OPENCLAW_PROVIDER: ${OPENCLAW_PROVIDER:-custom}
+      # ── Cloud provider keys (optional) ────────────────────────────────────
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+    # Generates openclaw.json from env vars, then starts the gateway.
+    # The config file is rewritten on every restart so env changes take effect.
+    command:
+      - sh
+      - -c
+      - |
+        node - <<'JS'
+        const e = process.env, fs = require('fs');
+        fs.mkdirSync('/home/node/.openclaw', { recursive: true });
+        const config = {
+          gateway: {
+            trustedProxies: (e.OPENCLAW_TRUSTED_PROXIES || '127.0.0.1,::1')
+              .split(',').map(s => s.trim()),
+            controlUi: {
+              allowedOrigins: e.OPENCLAW_ALLOWED_ORIGINS
+                ? e.OPENCLAW_ALLOWED_ORIGINS.split(',').map(s => s.trim())
+                : [],
+              dangerouslyAllowHostHeaderOriginFallback: true
+            }
+          }
+        };
+        if (e.OPENCLAW_BASE_URL) {
+          const p = e.OPENCLAW_PROVIDER || 'custom';
+          const m = e.OPENCLAW_MODEL || p;
+          config.models = {
+            providers: {
+              [p]: {
+                baseUrl: e.OPENCLAW_BASE_URL,
+                apiKey: e.OPENCLAW_API_KEY || '',
+                api: 'openai-completions',
+                models: [{ id: m }]
+              }
+            }
+          };
+          config.agents = { defaults: { model: { primary: p + '/' + m } } };
+        }
+        fs.writeFileSync('/home/node/.openclaw/openclaw.json', JSON.stringify(config, null, 2));
+        console.log('openclaw.json written');
+        JS
+        exec node dist/index.js gateway --bind lan --port 18789
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:18789/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  openclaw-state:
+  openclaw-auth:
