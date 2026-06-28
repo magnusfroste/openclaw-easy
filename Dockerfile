@@ -29,6 +29,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip3 install --no-cache-dir --break-system-packages uv \
     || (curl -LsSf https://astral.sh/uv/install.sh | sh)
 
+# Pre-install Playwright's Chromium + its system libraries so the agent can
+# browse immediately. The image ships playwright-core but not the browser, and
+# the cache dir is not a mounted volume, so baking it in is what makes browsing
+# survive redeploys. PLAYWRIGHT_BROWSERS_PATH is set so the runtime (root) finds
+# the same install.
+ENV PLAYWRIGHT_BROWSERS_PATH=/home/node/.cache/ms-playwright
+RUN node /app/node_modules/playwright-core/cli.js install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
+
 # Passwordless sudo for the unprivileged node user, in case the container is
 # ever run as node instead of root.
 RUN echo 'node ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/node \
