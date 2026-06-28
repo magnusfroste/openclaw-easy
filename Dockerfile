@@ -30,13 +30,19 @@ RUN pip3 install --no-cache-dir --break-system-packages uv \
     || (curl -LsSf https://astral.sh/uv/install.sh | sh)
 
 # Pre-install Playwright's Chromium + its system libraries so the agent can
-# browse immediately. The image ships playwright-core but not the browser, and
-# the cache dir is not a mounted volume, so baking it in is what makes browsing
-# survive redeploys. PLAYWRIGHT_BROWSERS_PATH is set so the runtime (root) finds
-# the same install.
+# browse immediately. The image ships playwright-core but not the browser.
+# .cache is a named volume (see compose) whose fresh copy is seeded from this
+# baked install, so browsing works on first boot and persists thereafter.
 ENV PLAYWRIGHT_BROWSERS_PATH=/home/node/.cache/ms-playwright
 RUN node /app/node_modules/playwright-core/cli.js install --with-deps chromium \
     && rm -rf /var/lib/apt/lists/*
+
+# Put the agent's persisted user-install bin dir (.local, a named volume) on
+# PATH so pip --user / uv / pipx tools are runnable, and make sure the dirs
+# exist for the volume mounts.
+ENV PATH=/home/node/.local/bin:$PATH
+RUN mkdir -p /home/node/.local/bin /home/node/.cache \
+    && chown -R node:node /home/node/.local /home/node/.cache
 
 # Passwordless sudo for the unprivileged node user, in case the container is
 # ever run as node instead of root.

@@ -40,7 +40,7 @@ Built-in providers (`openai`, `anthropic`, `openrouter`, `zai`, …) read their 
 
 ### Agent install freedom
 
-The container runs as root with build tools baked in, and any Easypanel env var reaches the agent's shell. The agent can `apt`/`pip`/`npm`-install ad-hoc; ad-hoc installs are lost on redeploy, so for anything permanent add it to the `Dockerfile`.
+The container runs as root with build tools baked in, and any Easypanel env var reaches the agent's shell. The agent can `apt`/`pip`/`npm`-install ad-hoc. Two named volumes persist the agent's own installs across redeploys: `.cache` (Playwright browsers, pip/build caches) and `.local` (pip `--user`, uv/pipx tools, on `PATH`). System-level `apt` packages still land in the image layer and reset on redeploy, so for durable system deps add them to the `Dockerfile`.
 
 > **Security note:** root + the gateway being internet-exposed + `OPENCLAW_DISABLE_DEVICE_AUTH` + `host.docker.internal` mapped means the gateway token effectively grants root with a path toward the host. This is a deliberate single-user, high-trust setup — keep the token secret and the origins locked down.
 

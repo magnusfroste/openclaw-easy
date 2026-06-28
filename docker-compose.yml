@@ -29,6 +29,12 @@ services:
     volumes:
       - openclaw-state:/home/node/.openclaw
       - openclaw-auth:/home/node/.config/openclaw
+      # Persist the agent's own installs so they survive redeploys:
+      #   .cache → Playwright browsers, pip/build caches (the baked Chromium is
+      #            copied into the fresh volume on first creation)
+      #   .local → user-level installs: pip --user, uv/pipx tools, their bin/
+      - openclaw-cache:/home/node/.cache
+      - openclaw-local:/home/node/.local
     # Pass through EVERY variable set in the Easypanel env panel as a runtime
     # env var. Easypanel writes those vars to a .env file next to this compose
     # file; env_file injects the whole file into the container. This is how new
@@ -178,3 +184,5 @@ services:
 volumes:
   openclaw-state:
   openclaw-auth:
+  openclaw-cache:
+  openclaw-local:
