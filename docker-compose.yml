@@ -66,16 +66,33 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-    # Generates openclaw.json from env vars, then starts the gateway.
-    # The config file is rewritten on every restart so env changes take effect.
+    # Merges env-driven essentials into openclaw.json, then starts the gateway.
+    # OpenClaw's own settings are preserved; only the env keys we manage change.
     command:
       - sh
       - -c
       - |
         node - <<'JS'
         const e = process.env, fs = require('fs');
+        const PATH = '/home/node/.openclaw/openclaw.json';
         fs.mkdirSync('/home/node/.openclaw', { recursive: true });
-        const config = {
+        // MERGE strategy: load OpenClaw's own config and only enforce the
+        // deploy/security essentials from env on top of it. Everything OpenClaw
+        // or the agent sets itself (HTTP endpoints, model catalog/aliases,
+        // bootstrap tuning, …) is preserved across redeploys.
+        let config = {};
+        try { config = JSON.parse(fs.readFileSync(PATH, 'utf8')) || {}; } catch (_) {}
+        if (typeof config !== 'object' || Array.isArray(config)) config = {};
+        const isObj = v => v && typeof v === 'object' && !Array.isArray(v);
+        const merge = (t, s) => {
+          for (const k of Object.keys(s)) {
+            if (isObj(s[k]) && isObj(t[k])) merge(t[k], s[k]);
+            else t[k] = s[k]; // env wins for leaves and arrays
+          }
+          return t;
+        };
+        // Env-driven essentials (env wins for exactly these keys).
+        const essentials = {
           gateway: {
             mode: 'local',
             trustedProxies: (e.OPENCLAW_TRUSTED_PROXIES || '127.0.0.1,::1')
@@ -87,7 +104,9 @@ services:
               dangerouslyAllowHostHeaderOriginFallback: true,
               dangerouslyDisableDeviceAuth: e.OPENCLAW_DISABLE_DEVICE_AUTH === '1'
             }
-          }
+          },
+          // root container => Chromium can't sandbox; required to launch.
+          browser: { noSandbox: true }
         };
         const providers = {};
         // Optional self-hosted OpenAI-compatible provider (vLLM, Ollama, …).
@@ -103,10 +122,8 @@ services:
         }
         // baseUrl override for a BUILT-IN provider, via OPENCLAW_<PROVIDER>_BASE_URL.
         // e.g. OPENCLAW_ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4 switches
-        // the built-in zai provider to the coding-plan endpoint. The key still
-        // comes from the provider's own env var (e.g. ZAI_API_KEY). This merges
-        // with the built-in provider definition (model catalog, costs) rather
-        // than replacing it, so it's NOT a full custom provider.
+        // the built-in zai provider to the coding-plan endpoint. Merged onto the
+        // built-in definition (model catalog, costs), not a full replacement.
         for (const [k, v] of Object.entries(e)) {
           const mm = k.match(/^OPENCLAW_([A-Z0-9]+)_BASE_URL$/);
           if (!mm || !v || !v.trim()) continue;
@@ -115,10 +132,8 @@ services:
           const keyVar = mm[1] + '_API_KEY';
           if (e[keyVar]) providers[id].apiKey = e[keyVar];
         }
-        if (Object.keys(providers).length) config.models = { providers };
+        if (Object.keys(providers).length) essentials.models = { providers };
         // Default model selection — env-driven so it survives redeploys.
-        // Falls back to the custom provider's model when only OPENCLAW_BASE_URL
-        // is set (preserves prior behaviour).
         const primary = (e.OPENCLAW_MODEL_PRIMARY || '').trim()
           || (e.OPENCLAW_BASE_URL
                 ? (e.OPENCLAW_PROVIDER || 'custom') + '/' + (e.OPENCLAW_MODEL || 'custom')
@@ -128,20 +143,25 @@ services:
         if (primary) {
           const model = { primary };
           if (fallbacks.length) model.fallbacks = fallbacks;
-          config.agents = { defaults: { model } };
+          essentials.agents = { defaults: { model } };
         }
-        // We run the container as root, so Chromium's sandbox can't initialise
-        // and the browser fails to launch unless noSandbox is set. This is a
-        // protected config path (can't be changed at runtime via config.patch),
-        // so it must be written here in the config file the gateway loads.
-        config.browser = { noSandbox: true };
-        // OpenClaw guards against accidental config clobbering: a config without
-        // meta is treated as suspect and auto-restored from the .last-good
-        // backup — which would silently ignore our env-driven config. Stamping
-        // meta.lastTouchedAt marks this as an intentional write so it sticks.
-        config.meta = { lastTouchedAt: new Date().toISOString() };
-        fs.writeFileSync('/home/node/.openclaw/openclaw.json', JSON.stringify(config, null, 2));
-        console.log('openclaw.json written');
+        merge(config, essentials);
+        // Sensible default: expose the OpenAI-compatible /v1/responses API out of
+        // the box, but let OpenClaw own it — only seed when unset, so an explicit
+        // true/false set by OpenClaw/UI is preserved.
+        const ep = config.gateway.http && config.gateway.http.endpoints
+          && config.gateway.http.endpoints.responses;
+        if (!ep || ep.enabled === undefined) {
+          config.gateway.http = config.gateway.http || {};
+          config.gateway.http.endpoints = config.gateway.http.endpoints || {};
+          config.gateway.http.endpoints.responses = Object.assign(
+            {}, config.gateway.http.endpoints.responses, { enabled: true });
+        }
+        // Stamp meta so OpenClaw's clobber guard treats this as an intentional
+        // write (a config without meta is auto-restored from .last-good).
+        config.meta = Object.assign({}, config.meta, { lastTouchedAt: new Date().toISOString() });
+        fs.writeFileSync(PATH, JSON.stringify(config, null, 2));
+        console.log('openclaw.json merged');
         JS
         exec node dist/index.js gateway --bind lan --port 18789
     healthcheck:

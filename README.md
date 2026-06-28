@@ -2,7 +2,7 @@
 
 Thin Easypanel deployment for [OpenClaw](https://github.com/openclaw/openclaw) — configure everything via environment variables, no manual JSON editing.
 
-On every start, `docker-compose.yml` runs a small inline script that writes `openclaw.json` from your env vars and then starts the gateway. This means your config always matches what you set in Easypanel, and updating is just a Redeploy.
+On every start, `docker-compose.yml` runs a small inline script that **merges** a handful of env-driven essentials into `openclaw.json` and then starts the gateway. Only the keys it manages — gateway origins/proxies, the default model, the z.ai endpoint, root `browser.noSandbox` — are enforced from env; everything else OpenClaw or the agent configures itself (HTTP endpoints, model catalog, tuning) is preserved across redeploys. So Easypanel env stays authoritative for deploy essentials, while OpenClaw owns the rest.
 
 It builds a thin image (`Dockerfile`) on top of the upstream OpenClaw image with a baseline of tools (sudo, build-essential, python3/pip, uv, git, ripgrep, …) and runs the container as **root**, so the agent can install whatever it needs at runtime. Every variable you set in the Easypanel env panel is passed through to the container as a runtime env var.
 
