@@ -1,22 +1,27 @@
 #
 # docker-compose.yml — OpenClaw Gateway on Easypanel
 #
-# Uses the upstream ghcr.io/openclaw/openclaw image — no local build.
+# Builds a thin image (Dockerfile) on top of ghcr.io/openclaw/openclaw that
+# bakes in a baseline of tools, and runs it as root for full install freedom.
 # On every start, a small inline script writes openclaw.json from env vars
-# so gateway config (trusted proxies, allowed origins, custom provider) is
+# so gateway config (trusted proxies, allowed origins, model selection) is
 # always in sync with the values you set in Easypanel.
 #
 services:
   openclaw:
-    image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}
-    pull_policy: ${PULL_POLICY:-always}
+    # Build our custom image (Dockerfile) on top of the upstream OpenClaw
+    # image so a baseline of tools is baked in. OPENCLAW_IMAGE picks the base.
+    build:
+      context: .
+      args:
+        OPENCLAW_IMAGE: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}
     restart: unless-stopped
     init: true
-    cap_drop:
-      - NET_RAW
-      - NET_ADMIN
-    security_opt:
-      - no-new-privileges:true
+    # Run as root so the agent has full freedom to install packages at runtime
+    # (apt/pip/npm). NOTE: combined with the internet-exposed gateway, device
+    # auth disabled, and host.docker.internal mapped, this is a deliberate,
+    # high-trust single-user setup — the token effectively grants root here.
+    user: "0:0"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -24,6 +29,14 @@ services:
     volumes:
       - openclaw-state:/home/node/.openclaw
       - openclaw-auth:/home/node/.config/openclaw
+    # Pass through EVERY variable set in the Easypanel env panel as a runtime
+    # env var. Easypanel writes those vars to a .env file next to this compose
+    # file; env_file injects the whole file into the container. This is how new
+    # keys (e.g. ZAI_API_KEY) reach OpenClaw and the agent without editing this
+    # file. The explicit `environment:` block below still takes precedence.
+    env_file:
+      - path: .env
+        required: false
     environment:
       HOME: /home/node
       TERM: xterm-256color
@@ -43,6 +56,12 @@ services:
       OPENCLAW_API_KEY: ${OPENCLAW_API_KEY:-}
       OPENCLAW_MODEL: ${OPENCLAW_MODEL:-}
       OPENCLAW_PROVIDER: ${OPENCLAW_PROVIDER:-custom}
+      # ── Default model selection (redeploy-safe, written to openclaw.json) ──
+      # primary: "<provider>/<model>", e.g. zai/glm-5.2 (built-in providers
+      # like zai are activated by their *_API_KEY env var alone).
+      # fallbacks: comma-separated "<provider>/<model>" list.
+      OPENCLAW_MODEL_PRIMARY: ${OPENCLAW_MODEL_PRIMARY:-}
+      OPENCLAW_MODEL_FALLBACKS: ${OPENCLAW_MODEL_FALLBACKS:-}
       # ── Cloud provider keys (optional) ────────────────────────────────────
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -70,20 +89,46 @@ services:
             }
           }
         };
+        const providers = {};
+        // Optional self-hosted OpenAI-compatible provider (vLLM, Ollama, …).
         if (e.OPENCLAW_BASE_URL) {
           const p = e.OPENCLAW_PROVIDER || 'custom';
           const m = e.OPENCLAW_MODEL || p;
-          config.models = {
-            providers: {
-              [p]: {
-                baseUrl: e.OPENCLAW_BASE_URL,
-                apiKey: e.OPENCLAW_API_KEY || '',
-                api: 'openai-completions',
-                models: [{ id: m, name: m }]
-              }
-            }
+          providers[p] = {
+            baseUrl: e.OPENCLAW_BASE_URL,
+            apiKey: e.OPENCLAW_API_KEY || '',
+            api: 'openai-completions',
+            models: [{ id: m, name: m }]
           };
-          config.agents = { defaults: { model: { primary: p + '/' + m } } };
+        }
+        // baseUrl override for a BUILT-IN provider, via OPENCLAW_<PROVIDER>_BASE_URL.
+        // e.g. OPENCLAW_ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4 switches
+        // the built-in zai provider to the coding-plan endpoint. The key still
+        // comes from the provider's own env var (e.g. ZAI_API_KEY). This merges
+        // with the built-in provider definition (model catalog, costs) rather
+        // than replacing it, so it's NOT a full custom provider.
+        for (const [k, v] of Object.entries(e)) {
+          const mm = k.match(/^OPENCLAW_([A-Z0-9]+)_BASE_URL$/);
+          if (!mm || !v || !v.trim()) continue;
+          const id = mm[1].toLowerCase();
+          providers[id] = { ...(providers[id] || {}), baseUrl: v.trim() };
+          const keyVar = mm[1] + '_API_KEY';
+          if (e[keyVar]) providers[id].apiKey = e[keyVar];
+        }
+        if (Object.keys(providers).length) config.models = { providers };
+        // Default model selection — env-driven so it survives redeploys.
+        // Falls back to the custom provider's model when only OPENCLAW_BASE_URL
+        // is set (preserves prior behaviour).
+        const primary = (e.OPENCLAW_MODEL_PRIMARY || '').trim()
+          || (e.OPENCLAW_BASE_URL
+                ? (e.OPENCLAW_PROVIDER || 'custom') + '/' + (e.OPENCLAW_MODEL || 'custom')
+                : '');
+        const fallbacks = (e.OPENCLAW_MODEL_FALLBACKS || '')
+          .split(',').map(s => s.trim()).filter(Boolean);
+        if (primary) {
+          const model = { primary };
+          if (fallbacks.length) model.fallbacks = fallbacks;
+          config.agents = { defaults: { model } };
         }
         fs.writeFileSync('/home/node/.openclaw/openclaw.json', JSON.stringify(config, null, 2));
         console.log('openclaw.json written');

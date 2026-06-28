@@ -1,0 +1,4 @@
+# Local/Easypanel-generated runtime env — never commit secrets.
+.env
+.env.*
+!example.env

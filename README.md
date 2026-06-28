@@ -4,6 +4,8 @@ Thin Easypanel deployment for [OpenClaw](https://github.com/openclaw/openclaw) �
 
 On every start, `docker-compose.yml` runs a small inline script that writes `openclaw.json` from your env vars and then starts the gateway. This means your config always matches what you set in Easypanel, and updating is just a Redeploy.
 
+It builds a thin image (`Dockerfile`) on top of the upstream OpenClaw image with a baseline of tools (sudo, build-essential, python3/pip, uv, git, ripgrep, …) and runs the container as **root**, so the agent can install whatever it needs at runtime. Every variable you set in the Easypanel env panel is passed through to the container as a runtime env var.
+
 ## Easypanel setup
 
 1. **Create a new service** → App → set *Application source* to **Docker Compose** from GitHub: `magnusfroste/openclaw-easy`
@@ -21,9 +23,26 @@ On every start, `docker-compose.yml` runs a small inline script that writes `ope
    | `OPENCLAW_API_KEY` | no | API key for the custom endpoint |
    | `OPENCLAW_MODEL` | no | Model ID served by the custom endpoint |
    | `OPENCLAW_PROVIDER` | no | Provider name shown in OpenClaw (any string) |
-   | `OPENAI_API_KEY` | no | OpenAI key (cloud, alternative to custom endpoint) |
-   | `ANTHROPIC_API_KEY` | no | Anthropic key |
-   | `OPENROUTER_API_KEY` | no | OpenRouter key |
+   | `OPENCLAW_MODEL_PRIMARY` | no | Default model as `provider/model`, e.g. `zai/glm-5.2` (redeploy-safe) |
+   | `OPENCLAW_MODEL_FALLBACKS` | no | Comma-separated `provider/model` fallback list |
+   | `OPENCLAW_<PROVIDER>_BASE_URL` | no | Override a built-in provider's endpoint, e.g. `OPENCLAW_ZAI_BASE_URL` |
+   | `OPENAI_API_KEY` | no | OpenAI key (built-in provider) |
+   | `ANTHROPIC_API_KEY` | no | Anthropic key (built-in provider) |
+   | `OPENROUTER_API_KEY` | no | OpenRouter key (built-in provider) |
+   | `ZAI_API_KEY` | no | Z.ai (GLM) key — built-in provider; `Z_AI_API_KEY` is a legacy alias |
+   | *(any other var)* | no | Passed through to the container at runtime as-is |
+
+### Choosing the model
+
+Built-in providers (`openai`, `anthropic`, `openrouter`, `zai`, …) read their `*_API_KEY` from the env — set the key, then point `OPENCLAW_MODEL_PRIMARY` at e.g. `zai/glm-5.2`. Because the model selection is written into `openclaw.json` on every start, it **survives redeploys**. Picking a model in the Control UI instead does *not* survive — the inline script overwrites `openclaw.json` each start.
+
+**z.ai (GLM) note:** the built-in `zai` provider defaults to the *general* endpoint (`…/api/paas/v4`, default model `glm-5.1`). To use `glm-5.2` on the **coding plan** you must also set `OPENCLAW_ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4` — otherwise the model breaks on redeploy. The override merges with the built-in provider (keeps its model catalog); the key still comes from `ZAI_API_KEY`.
+
+### Agent install freedom
+
+The container runs as root with build tools baked in, and any Easypanel env var reaches the agent's shell. The agent can `apt`/`pip`/`npm`-install ad-hoc; ad-hoc installs are lost on redeploy, so for anything permanent add it to the `Dockerfile`.
+
+> **Security note:** root + the gateway being internet-exposed + `OPENCLAW_DISABLE_DEVICE_AUTH` + `host.docker.internal` mapped means the gateway token effectively grants root with a path toward the host. This is a deliberate single-user, high-trust setup — keep the token secret and the origins locked down.
 
 4. **Deploy** → the gateway starts at your domain on port `18789`.
 
