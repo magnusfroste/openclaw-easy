@@ -130,6 +130,11 @@ services:
           if (fallbacks.length) model.fallbacks = fallbacks;
           config.agents = { defaults: { model } };
         }
+        // OpenClaw guards against accidental config clobbering: a config without
+        // meta is treated as suspect and auto-restored from the .last-good
+        // backup — which would silently ignore our env-driven config. Stamping
+        // meta.lastTouchedAt marks this as an intentional write so it sticks.
+        config.meta = { lastTouchedAt: new Date().toISOString() };
         fs.writeFileSync('/home/node/.openclaw/openclaw.json', JSON.stringify(config, null, 2));
         console.log('openclaw.json written');
         JS
