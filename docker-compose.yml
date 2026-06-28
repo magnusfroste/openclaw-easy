@@ -130,6 +130,11 @@ services:
           if (fallbacks.length) model.fallbacks = fallbacks;
           config.agents = { defaults: { model } };
         }
+        // We run the container as root, so Chromium's sandbox can't initialise
+        // and the browser fails to launch unless noSandbox is set. This is a
+        // protected config path (can't be changed at runtime via config.patch),
+        // so it must be written here in the config file the gateway loads.
+        config.browser = { noSandbox: true };
         // OpenClaw guards against accidental config clobbering: a config without
         // meta is treated as suspect and auto-restored from the .last-good
         // backup — which would silently ignore our env-driven config. Stamping
