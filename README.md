@@ -17,7 +17,7 @@ It builds a thin image (`Dockerfile`) on top of the upstream OpenClaw image with
    | Variable | Required | Description |
    |---|---|---|
    | `OPENCLAW_GATEWAY_TOKEN` | yes | Auth token — generate with `openssl rand -hex 32` |
-   | `OPENCLAW_ALLOWED_ORIGINS` | yes | Your public domain, e.g. `https://openclaw.example.com` |
+   | `OPENCLAW_ALLOWED_ORIGINS` | yes | Your public domain, e.g. `https://openclaw.example.com` — origin only, **no trailing slash** |
    | `OPENCLAW_TRUSTED_PROXIES` | yes | Proxy CIDRs — default covers Easypanel's `10.11.0.0/16` |
    | `OPENCLAW_BASE_URL` | no | Custom OpenAI-compatible endpoint base URL |
    | `OPENCLAW_API_KEY` | no | API key for the custom endpoint |
@@ -45,6 +45,23 @@ The container runs as root with build tools baked in, and any Easypanel env var 
 > **Security note:** root + the gateway being internet-exposed + `OPENCLAW_DISABLE_DEVICE_AUTH` + `host.docker.internal` mapped means the gateway token effectively grants root with a path toward the host. This is a deliberate single-user, high-trust setup — keep the token secret and the origins locked down.
 
 4. **Deploy** → the gateway starts at your domain on port `18789`.
+
+### Running more than one instance
+
+Nothing extra to do — the container publishes **no host port**. It only `expose`s
+18789 on Easypanel's internal network, and Traefik routes to it by service alias,
+so any number of instances can run side by side on the same server.
+
+Earlier versions of this compose file bound `${OPENCLAW_PORT}:18789` on the host.
+A second instance then died before it was even created:
+
+```
+Bind for 0.0.0.0:18789 failed: port is already allocated
+```
+
+Easypanel shows the deploy as finished, but no container exists and the domain
+returns a gateway error. If you still have `OPENCLAW_PORT` in your env panel it is
+simply ignored now — the port that matters is the one on the **Domains** tab.
 
 ## Upgrading
 

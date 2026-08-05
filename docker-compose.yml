@@ -24,8 +24,15 @@ services:
     user: "0:0"
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    ports:
-      - "${OPENCLAW_PORT:-18789}:18789"
+    # No host port is published. Easypanel attaches this service to the shared
+    # "easypanel" network and points Traefik at the container by service alias
+    # (http://app_<project>_openclaw:18789), so a host binding is unnecessary —
+    # and a fixed one makes a SECOND instance impossible: the deploy dies with
+    # "Bind for 0.0.0.0:18789 failed: port is already allocated" before the
+    # container is ever created. Set the port to 18789 in Easypanel's Domains
+    # tab; that is what routing uses.
+    expose:
+      - "18789"
     volumes:
       - openclaw-state:/home/node/.openclaw
       - openclaw-auth:/home/node/.config/openclaw
