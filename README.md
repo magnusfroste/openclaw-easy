@@ -19,6 +19,7 @@ It builds a thin image (`Dockerfile`) on top of the upstream OpenClaw image with
    | `OPENCLAW_GATEWAY_TOKEN` | yes | Auth token — generate with `openssl rand -hex 32` |
    | `OPENCLAW_ALLOWED_ORIGINS` | yes | Your public domain, e.g. `https://openclaw.example.com` — origin only, **no trailing slash** |
    | `OPENCLAW_TRUSTED_PROXIES` | yes | Proxy CIDRs — default covers Easypanel's `10.11.0.0/16` |
+   | `OPENCLAW_PUBLIC_URL` | no | URL the mobile app pairs against; defaults to the first allowed origin |
    | `OPENCLAW_BASE_URL` | no | Custom OpenAI-compatible endpoint base URL |
    | `OPENCLAW_API_KEY` | no | API key for the custom endpoint |
    | `OPENCLAW_MODEL` | no | Model ID served by the custom endpoint |
@@ -37,6 +38,28 @@ It builds a thin image (`Dockerfile`) on top of the upstream OpenClaw image with
 Built-in providers (`openai`, `anthropic`, `openrouter`, `zai`, …) read their `*_API_KEY` from the env — set the key, then point `OPENCLAW_MODEL_PRIMARY` at e.g. `zai/glm-5.2`. Because the model selection is written into `openclaw.json` on every start, it **survives redeploys**. Picking a model in the Control UI instead does *not* survive — the inline script overwrites `openclaw.json` each start.
 
 **z.ai (GLM) note:** the built-in `zai` provider defaults to the *general* endpoint (`…/api/paas/v4`, default model `glm-5.1`). To use `glm-5.2` on the **coding plan** you must also set `OPENCLAW_ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4` — otherwise the model breaks on redeploy. The override merges with the built-in provider (keeps its model catalog); the key still comes from `ZAI_API_KEY`.
+
+### Mobile pairing (OpenClaw Mobile)
+
+Behind a reverse proxy the gateway only ever sees loopback and the Docker network,
+so it cannot work out its own public address. Generating a pairing QR then fails:
+
+```
+Could not create a setup code.
+GatewayRequestError: Gateway is only bound to loopback. Set gateway.bind=lan, …
+```
+
+This compose file fixes that by writing `plugins.entries.device-pair.config.publicUrl`
+into `openclaw.json` on every start, taken from `OPENCLAW_PUBLIC_URL` or — if unset —
+the first `OPENCLAW_ALLOWED_ORIGINS` entry. `https://` is normalized to `wss://`.
+Verify inside the container with:
+
+```bash
+openclaw qr    # should print "Source: plugins.entries.device-pair.config.publicUrl"
+```
+
+Setting `gateway.bind=lan` instead (as the error suggests) is the wrong fix here: it
+resolves to the container's private `10.x` address, which no phone can reach.
 
 ### Agent install freedom
 

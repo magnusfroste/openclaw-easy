@@ -65,6 +65,10 @@ services:
       # ── Reverse proxy / CORS ──────────────────────────────────────────────
       OPENCLAW_ALLOWED_ORIGINS: ${OPENCLAW_ALLOWED_ORIGINS:-}
       OPENCLAW_TRUSTED_PROXIES: ${OPENCLAW_TRUSTED_PROXIES:-127.0.0.1,10.11.0.0/16,::1}
+      # Public wss:// (or https://) URL the mobile app should connect back to.
+      # Defaults to the first OPENCLAW_ALLOWED_ORIGINS entry; set this only if
+      # the app should reach the gateway on a different host than the UI.
+      OPENCLAW_PUBLIC_URL: ${OPENCLAW_PUBLIC_URL:-}
       # Set to 1 to skip per-browser device pairing — token alone grants access.
       # Convenient for a single-user setup; weaker than the default (no per-device identity).
       OPENCLAW_DISABLE_DEVICE_AUTH: ${OPENCLAW_DISABLE_DEVICE_AUTH:-}
@@ -150,6 +154,18 @@ services:
           if (e[keyVar]) providers[id].apiKey = e[keyVar];
         }
         if (Object.keys(providers).length) essentials.models = { providers };
+        // Mobile pairing (device-pair plugin). Behind Traefik the gateway only
+        // ever sees loopback/LAN, so it cannot work out its own public address:
+        // "openclaw qr" then fails with "Gateway is only bound to loopback".
+        // Tell it explicitly. https:// is normalized to wss:// (and any path is
+        // dropped), so the Control UI origin works as-is.
+        const publicUrl = (e.OPENCLAW_PUBLIC_URL || '').trim()
+          || (e.OPENCLAW_ALLOWED_ORIGINS || '').split(',')[0].trim();
+        if (publicUrl) {
+          essentials.plugins = {
+            entries: { 'device-pair': { config: { publicUrl } } }
+          };
+        }
         // Default model selection — env-driven so it survives redeploys.
         const primary = (e.OPENCLAW_MODEL_PRIMARY || '').trim()
           || (e.OPENCLAW_BASE_URL
