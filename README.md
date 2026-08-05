@@ -67,6 +67,22 @@ simply ignored now — the port that matters is the one on the **Domains** tab.
 
 Bump `OPENCLAW_IMAGE` in the env panel and hit Redeploy. The gateway token and all settings survive because they come from env vars, not from inside the container.
 
+**`:latest` can lag behind the release.** OpenClaw does not always move the `latest`
+tag to the newest build, so the Control UI may report an update that a redeploy never
+brings in — e.g. `latest` pointed at `2026.7.1-1` while `2026.7.1-2` was already
+published. Check what is actually out there and pin the exact tag:
+
+```bash
+curl -s "https://ghcr.io/token?scope=repository:openclaw/openclaw:pull" \
+  | grep -o '"token":"[^"]*"' | cut -d'"' -f4 \
+  | xargs -I{} curl -s -H "Authorization: Bearer {}" \
+      https://ghcr.io/v2/openclaw/openclaw/tags/list?n=1000
+```
+
+Then set `OPENCLAW_IMAGE=ghcr.io/openclaw/openclaw:<tag>` and redeploy. The build uses
+`pull: true`, so a moved `latest` is also picked up — but an unmoved one can only be
+bypassed by pinning.
+
 ## Why not the Easypanel catalog template?
 
 The catalog template is outdated and passes `OPENCLAW_GATEWAY_CONTROLUI_ALLOWEDORIGINS` and `OPENCLAW_GATEWAY_TRUSTEDPROXIES` as env vars — these are **not recognized by OpenClaw** and are silently ignored. Those settings only work inside `openclaw.json`. This repo handles that correctly.
